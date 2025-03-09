@@ -2,7 +2,7 @@ function ConvertFrom-ARM {
     [CmdletBinding()]
     param (
         [string[]] $Targets,
-        [ValidateSet('Azure Resource Group')]
+        [ValidateSet('Azure Resource Group','File')]
         [string] $TargetType = 'Azure Resource Group',
         [int] $CategoryDepth = 1,
         [string[]] $ExcludeTypes
@@ -75,8 +75,10 @@ function ConvertFrom-ARM {
 
             if ($resources) {
                 Write-CustomHost "Total resources found: $($resources.count)"  -Indentation 2 -color Green
-                Write-CustomHost "Cleaning up temporary ARM template file at: $template"  -Indentation 2 -color Green
-                Remove-Item $template -Force
+                if ($TargetType -eq 'Azure Resource Group') {
+                    Write-CustomHost "Cleaning up temporary ARM template file at: $template"  -Indentation 2 -color Green
+                    Remove-Item $template -Force
+                }
             }
             else {
                 Write-CustomHost "Total resources/sub-resources found: $($resources.count)"  -Indentation 2 -color Green

@@ -10,20 +10,21 @@ function ConvertFrom-Network {
     
     begin {
         $rank = @{
-            "Microsoft.Network/publicIPAddresses"     = 1
-            "Microsoft.Network/loadBalancers"         = 2
-            "Microsoft.Network/virtualNetworks"       = 3 
-            "Microsoft.Network/networkSecurityGroups" = 4
-            "Microsoft.Network/networkInterfaces"     = 5
-            "Microsoft.Compute/virtualMachines"       = 6
+            "Microsoft.Network/virtualNetworks"       = 1 
+            "Microsoft.Network/applicationGateways"   = 2
+            "Microsoft.Network/loadBalancers"         = 3
+            "Microsoft.Network/publicIPAddresses"     = 4
+            "Microsoft.Network/networkSecurityGroups" = 5
+            "Microsoft.Network/networkInterfaces"     = 6
+            "Microsoft.Compute/virtualMachines"       = 7
         }
 
         # $Excluded_NetworkObjects = $("Microsoft.Network/virtualNetworks/subnets", "Microsoft.Network/virtualNetworks")
-        $Excluded_NetworkObjects = $(
-            "*Microsoft.Network/virtualNetworks*",
-            "*Microsoft.Network/virtualNetworks/subnets*",
-            "*Microsoft.Network/networkSecurityGroups*"
-        ) 
+        # $Excluded_NetworkObjects = $(
+        #     "*Microsoft.Network/virtualNetworks*",
+        #     "*Microsoft.Network/virtualNetworks/subnets*",
+        #     "*Microsoft.Network/networkSecurityGroups*"
+        # ) 
                 
         if($ExcludeTypes){
             $Excluded_NetworkObjects += $ExcludeTypes

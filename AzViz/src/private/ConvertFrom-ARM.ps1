@@ -18,11 +18,12 @@ function ConvertFrom-ARM {
             "Microsoft.Compute/virtualMachines"       = 6
         }
 
-        $Excluded_ARMObjects = $(
-            "Microsoft.Network/virtualNetworks*",
-            "Microsoft.Network/virtualNetworks/subnets*",
-            "Microsoft.Network/networkSecurityGroups*"
-        ) 
+        # Edited: Removed to allow to be configurable
+        # $Excluded_ARMObjects = $(
+        #     "Microsoft.Network/virtualNetworks*",
+        #     "Microsoft.Network/virtualNetworks/subnets*",
+        #     "Microsoft.Network/networkSecurityGroups*"
+        # ) 
         
         if($ExcludeTypes){
             $Excluded_ARMObjects += $ExcludeTypes

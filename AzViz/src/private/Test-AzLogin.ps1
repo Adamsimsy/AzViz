@@ -10,7 +10,15 @@ function Test-AzLogin {
         # Verify we are signed into an Azure account
         try {
             try{
-                Import-Module Az.Accounts -Verbose:$false   
+                Remove-Module AzureRM.Profile -Force -ErrorAction SilentlyContinue  # AzureRM causes a conflict with Az modules
+                Enable-AzureRmAlias -Scope CurrentUser -ErrorAction SilentlyContinue  # solves type implementation exception
+
+                Write-CustomHost "Checking Azure login status..." -ForegroundColor Cyan
+
+                if (!(Get-Module -ListAvailable -Name Az.Accounts)) {
+                    Install-Module -Name Az.Accounts -Repository PSGallery -AllowClobber -Force -Scope CurrentUser  
+                }
+                Import-Module Az.Accounts
             }
             catch {}
             Write-Verbose 'Testing Azure login'

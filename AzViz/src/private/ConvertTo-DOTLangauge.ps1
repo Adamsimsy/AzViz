@@ -2,8 +2,8 @@ function ConvertTo-DOTLanguage {
     [CmdletBinding()]
     param (
         [string[]] $Targets,
-        [ValidateSet('Azure Resource Group')]
-        [string] $TargetType = 'Azure Resource Group',
+        [ValidateSet('Azure Resource Group','File')]
+        [string] $TargetType,
         [int] $LabelVerbosity = 1,
         [int] $CategoryDepth = 1,
         [string] $Direction = 'top-to-bottom',
@@ -19,17 +19,26 @@ function ConvertTo-DOTLanguage {
     }
     
     process {
-
-        if (!(Test-AzLogin)) {
-            break
-        }
         
         $SpecialChars = '() []{}&-.'
         $GraphObjects = @()
-        $NetworkObjects = ConvertFrom-Network -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
-        $GraphObjects += $NetworkObjects
-        $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
-        $GraphObjects += $ARMObjects
+        
+        if ($TargetType -eq 'Azure Resource Group') {
+            if (!(Test-AzLogin)) {
+                break
+            }
+            $NetworkObjects = ConvertFrom-Network -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
+            $GraphObjects += $NetworkObjects
+
+            # Both ConvertFrom-ARM and ConvertFrom-Network are called when usng Azure Resource Group name
+            $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
+            $GraphObjects += $ARMObjects
+        }
+
+        if ($TargetType -eq 'File') {
+            $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
+            $GraphObjects += $ARMObjects
+        }
 
         $GraphObjects = $GraphObjects | 
         Group-Object Name | 
@@ -47,82 +56,84 @@ function ConvertTo-DOTLanguage {
             $Counter = $Counter + 1              
             Write-CustomHost "Plotting sub-graph for $($Target.Type): `"$($Target.Name)`"" -Indentation 1 -color Green -AddTime
 
-            $VNets = Get-AzVirtualNetwork -ResourceGroupName $Target.Name -Verbose:$false
-            $NetworkLayout = @()
-            if ($VNets) {
-                
-                $VNetCounter = 0
-                $VMs_and_NICs = @()
-                $VMs = Get-AzVM -ResourceGroupName $Target.Name -Verbose:$false
-                $NICs = Get-AzNetworkInterface -ResourceGroupName $Target.Name -Verbose:$false
-                $VMs_and_NICs += $VMs
-                $VMs_and_NICs += $NICs
-                
-                foreach ($vnet in $VNets) {
+            if ($TargetType -eq 'Azure Resource Group') {
+                $VNets = Get-AzVirtualNetwork -ResourceGroupName $Target.Name -Verbose:$false
+                $NetworkLayout = @()
+                if ($VNets) {
                     
-                    $VNetCounter = $VNetCounter + 1
+                    $VNetCounter = 0
+                    $VMs_and_NICs = @()
+                    $VMs = Get-AzVM -ResourceGroupName $Target.Name -Verbose:$false
+                    $NICs = Get-AzNetworkInterface -ResourceGroupName $Target.Name -Verbose:$false
+                    $VMs_and_NICs += $VMs
+                    $VMs_and_NICs += $NICs
+                    
+                    foreach ($vnet in $VNets) {
+                        
+                        $VNetCounter = $VNetCounter + 1
 
-                    $VNetLabel = Get-ImageLabel -Type "Microsoft.Network/virtualNetworks" -Row1 "$($VNet.Name)" -Row2 "$([string]$VNet.AddressSpace.AddressPrefixes)"
-                    $VNetSubGraphName = Remove-SpecialChars -String $VNet.Name -SpecialChars $SpecialChars
-                    $VNetSubGraphAttributes = @{
-                        label    = $VNetLabel;
-                        labelloc = 't';
-                        penwidth = "1";
-                        fontname = "Courier New" ;
-                        style    = "rounded,dashed";
-                        color    = $VNetGraphColor
-                        bgcolor  = $VNetGraphBGColor
-                    }
-    
-                    # generating dot language for virtual networks and then iterating all the subnets
-                    $NetworkLayout += SubGraph -Name $VNetSubGraphName -Attributes $VNetSubGraphAttributes -ScriptBlock {
-                        $Subnets = $VNet.Subnets
-
-                        # if there a no subnets in a virtual network, then plot empty vNet
-                        # if(!$Subnets){ 
-
-                        # }
-                        # else{
-                        foreach ($subnet in $Subnets) {
-    
-                            $SubnetLabel = Get-ImageLabel -Type "Subnets" -Row1 "$($Subnet.Name)" -Row2 "$([string]$Subnet.AddressPrefix)"
-                            $SubnetSubGraphName = Remove-SpecialChars -String $Subnet.Name -SpecialChars $SpecialChars
-                            $SubnetSubGraphAttributes = @{
-                                label    = $SubnetLabel;
-                                labelloc = 't';
-                                penwidth = "1";
-                                fontname = "Courier New" ;
-                                style    = "rounded,dashed";
-                                color    = $SubnetGraphColor
-                                bgcolor  = $SubnetGraphBGColor; 
-                            }
-    
-                            # generating dot language for subnets inside virtual networks    
-                            SubGraph -Name $SubnetSubGraphName -Attributes $SubnetSubGraphAttributes -ScriptBlock {    
-                                $resources_in_subnet = foreach ($item in $VMs_and_NICs) {
-                                    switch ($item.Type) {
-                                        'Microsoft.Compute/virtualMachines' {
-                                            $networkInterface = $NICs.Where( { $_.name -eq ($item.NetworkProfile.NetworkInterfaces[0].Id.Split('/')[-1]) })
-                                            $subnetName = $networkInterface.IpConfigurations[0].Subnet.Id.split('/')[-1] 
-                                        }
-                                        'Microsoft.Network/networkInterfaces' {
-                                            $subnetName = $item.IpConfigurations[0].Subnet.Id.split('/')[-1] 
-                                        }
-                                    }
-        
-                                    if ($subnetName -eq $subnet.Name) {
-                                        $item | Select-Object Name, Type
-                                    }
-                                }
-        
-                                $resources_in_subnet |
-                                ForEach-Object {
-                                    Get-ImageNode -Name "$($_.Type)/$($_.Name)".tolower() -Rows $_.Name -Type $_.Type
-                                }
-                            }
+                        $VNetLabel = Get-ImageLabel -Type "Microsoft.Network/virtualNetworks" -Row1 "$($VNet.Name)" -Row2 "$([string]$VNet.AddressSpace.AddressPrefixes)"
+                        $VNetSubGraphName = Remove-SpecialChars -String $VNet.Name -SpecialChars $SpecialChars
+                        $VNetSubGraphAttributes = @{
+                            label    = $VNetLabel;
+                            labelloc = 't';
+                            penwidth = "1";
+                            fontname = "Courier New" ;
+                            style    = "rounded,dashed";
+                            color    = $VNetGraphColor
+                            bgcolor  = $VNetGraphBGColor
                         }
-                        # }
+        
+                        # generating dot language for virtual networks and then iterating all the subnets
+                        $NetworkLayout += SubGraph -Name $VNetSubGraphName -Attributes $VNetSubGraphAttributes -ScriptBlock {
+                            $Subnets = $VNet.Subnets
 
+                            # if there a no subnets in a virtual network, then plot empty vNet
+                            # if(!$Subnets){ 
+
+                            # }
+                            # else{
+                            foreach ($subnet in $Subnets) {
+        
+                                $SubnetLabel = Get-ImageLabel -Type "Subnets" -Row1 "$($Subnet.Name)" -Row2 "$([string]$Subnet.AddressPrefix)"
+                                $SubnetSubGraphName = Remove-SpecialChars -String $Subnet.Name -SpecialChars $SpecialChars
+                                $SubnetSubGraphAttributes = @{
+                                    label    = $SubnetLabel;
+                                    labelloc = 't';
+                                    penwidth = "1";
+                                    fontname = "Courier New" ;
+                                    style    = "rounded,dashed";
+                                    color    = $SubnetGraphColor
+                                    bgcolor  = $SubnetGraphBGColor; 
+                                }
+        
+                                # generating dot language for subnets inside virtual networks    
+                                SubGraph -Name $SubnetSubGraphName -Attributes $SubnetSubGraphAttributes -ScriptBlock {    
+                                    $resources_in_subnet = foreach ($item in $VMs_and_NICs) {
+                                        switch ($item.Type) {
+                                            'Microsoft.Compute/virtualMachines' {
+                                                $networkInterface = $NICs.Where( { $_.name -eq ($item.NetworkProfile.NetworkInterfaces[0].Id.Split('/')[-1]) })
+                                                $subnetName = $networkInterface.IpConfigurations[0].Subnet.Id.split('/')[-1] 
+                                            }
+                                            'Microsoft.Network/networkInterfaces' {
+                                                $subnetName = $item.IpConfigurations[0].Subnet.Id.split('/')[-1] 
+                                            }
+                                        }
+            
+                                        if ($subnetName -eq $subnet.Name) {
+                                            $item | Select-Object Name, Type
+                                        }
+                                    }
+            
+                                    $resources_in_subnet |
+                                    ForEach-Object {
+                                        Get-ImageNode -Name "$($_.Type)/$($_.Name)".tolower() -Rows $_.Name -Type $_.Type
+                                    }
+                                }
+                            }
+                            # }
+
+                        }
                     }
                 }
             }
@@ -229,23 +240,48 @@ function ConvertTo-DOTLanguage {
             }
 
             if ($Resources -or $VNets) {
-                $ResourceGroupLocation = (Get-AzResourceGroup -Name $Target.Name -Verbose:$false).Location
-                $ResourceGroupSubGraphName = [string]::Concat($(Remove-SpecialChars -String $Target.Name -SpecialChars $SpecialChars), $Counter)
-                $ResourceGroupSubGraphNameLabel = Get-ImageLabel -Type "ResourceGroups" -Row1 "ResourceGroup: $(Remove-SpecialChars -String $Target.name -SpecialChars $SpecialChars)" -Row2 "Location: $($ResourceGroupLocation)"
-                $ResourceGroupSubGraphAttributes = @{
-                    label    = $ResourceGroupSubGraphNameLabel;
-                    labelloc = 't';
-                    penwidth = "1";
-                    fontname = "Courier New" ;
-                    style    = "rounded, dashed";
-                    color    = $ResourceGroupGraphColor;
-                    bgcolor  = $ResourceGroupGraphBGColor;
-                    fontsize = "9"; 
-                }
 
-                SubGraph -Name $ResourceGroupSubGraphName -Attributes $ResourceGroupSubGraphAttributes -ScriptBlock {
-                    $NetworkLayout
-                    $NodesAndEdges
+                if ($TargetType -eq 'Azure Resource Group') {
+                    $ResourceGroupLocation = (Get-AzResourceGroup -Name $Target.Name -Verbose:$false).Location
+                    $ResourceGroupSubGraphName = [string]::Concat($(Remove-SpecialChars -String $Target.Name -SpecialChars $SpecialChars), $Counter)
+                    $ResourceGroupSubGraphNameLabel = Get-ImageLabel -Type "ResourceGroups" -Row1 "ResourceGroup: $(Remove-SpecialChars -String $Target.name -SpecialChars $SpecialChars)" -Row2 "Location: $($ResourceGroupLocation)"
+                    $ResourceGroupSubGraphAttributes = @{
+                        label    = $ResourceGroupSubGraphNameLabel;
+                        labelloc = 't';
+                        penwidth = "1";
+                        fontname = "Courier New" ;
+                        style    = "rounded, dashed";
+                        color    = $ResourceGroupGraphColor;
+                        bgcolor  = $ResourceGroupGraphBGColor;
+                        fontsize = "9"; 
+                    }
+    
+                    SubGraph -Name $ResourceGroupSubGraphName -Attributes $ResourceGroupSubGraphAttributes -ScriptBlock {
+                        $NetworkLayout
+                        $NodesAndEdges
+                    }
+                }
+                else
+                {
+                    $targetRGName = $Target.Name -replace '.*\\(.+?)\.raw\.json$', '$1'
+
+                    $ResourceGroupSubGraphName = [string]::Concat($(Remove-SpecialChars -String $targetRGName -SpecialChars $SpecialChars), $Counter)
+                    $ResourceGroupSubGraphNameLabel = Get-ImageLabel -Type "ResourceGroups" -Row1 "ResourceGroup: $targetRGName"
+                    $ResourceGroupSubGraphAttributes = @{
+                        label    = $ResourceGroupSubGraphNameLabel;
+                        labelloc = 't';
+                        penwidth = "1";
+                        fontname = "Courier New" ;
+                        style    = "rounded, dashed";
+                        color    = $ResourceGroupGraphColor;
+                        bgcolor  = $ResourceGroupGraphBGColor;
+                        fontsize = "9"; 
+                    }
+    
+                    SubGraph -Name $ResourceGroupSubGraphName -Attributes $ResourceGroupSubGraphAttributes -ScriptBlock {
+                        $NetworkLayout
+                        $NodesAndEdges
+                    }
                 }
             } else {
                 Write-CustomHost -String "No resources found.. re-run the command and try increasing the category depth using -CategoryDepth 2 or -CategoryDepth 3 cmdlet parameters." -Indentation 1 -Color Red -AddTime

@@ -266,12 +266,12 @@ function Export-AzViz {
         #region graph-generation
         Write-CustomHost "Starting to generate Azure visualization..." -Indentation 0 -color Magenta -AddTime
     
-        $graph = ConvertTo-DOTLanguage -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -LabelVerbosity $LabelVerbosity -Splines $Splines -ExcludeTypes $ExcludeTypes
+        $graph = ConvertTo-DOTLanguage -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -LabelVerbosity $LabelVerbosity -Splines $Splines -ExcludeTypes $ExcludeTypes -DestinationPath $OutputFilePath
 
         if ($graph) {
             @"
 strict $graph
-"@ | Export-PSGraph -GraphVizPath $GraphViz.FullName -ShowGraph:$Show -OutputFormat $OutputFormat -DestinationPath $OutputFilePath -OutVariable output |
+"@ | Export-PSGraph -GraphVizPath $GraphViz.FullName -ShowGraph:$Show -OutputFormat '$OutputFormat' -DestinationPath $OutputFilePath -OutVariable output |
             Out-Null
             Write-CustomHost "Visualization exported to path: $($output.fullname)" -Indentation 0 -color Magenta -AddTime
             Write-CustomHost "Finished Azure visualization." -Indentation 0 -color Magenta -AddTime

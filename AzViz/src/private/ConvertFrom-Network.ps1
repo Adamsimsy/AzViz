@@ -5,7 +5,8 @@ function ConvertFrom-Network {
         [ValidateSet('Azure Resource Group')]
         [string] $TargetType = 'Azure Resource Group',
         [int] $CategoryDepth = 1,
-        [string[]] $ExcludeTypes
+        [string[]] $ExcludeTypes,
+        [bool] $AllowNetworkConnectionsOutsideRg = $false
     )
     
     begin {
@@ -85,7 +86,17 @@ function ConvertFrom-Network {
                         Foreach ($to in $_.to) {
                             # todo: only allow network connections within the resource group to be included
                             # as the module evolves, need to figure out a way to visualize network connections outside resource group
-                            if($to.ResourceID -like "*$ResourceGroup*"){
+
+                            if ($to.ResourceID -like "*$ResourceGroup*")
+                            {
+                                $allowNetworkConnectionsOutsideRg = $true
+                            }
+                            else 
+                            {
+                                $allowNetworkConnectionsOutsideRg = $AllowNetworkConnectionsOutsideRg
+                            }
+                            
+                            if($allowNetworkConnectionsOutsideRg){
                                 $fromcateg = $_.FromCateg
                                 $r = $rank[$fromcateg]
                                 [PSCustomObject]@{

@@ -8,7 +8,9 @@ function ConvertTo-DOTLanguage {
         [int] $CategoryDepth = 1,
         [string] $Direction = 'top-to-bottom',
         [string] $Splines = 'spline',
-        [string[]] $ExcludeTypes
+        [string[]] $ExcludeTypes,
+        [bool] $UseNetworkWatcher = $false,
+        [string] $DestinationPath
     )
     
     begin {
@@ -27,8 +29,11 @@ function ConvertTo-DOTLanguage {
             if (!(Test-AzLogin)) {
                 break
             }
-            $NetworkObjects = ConvertFrom-Network -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
-            $GraphObjects += $NetworkObjects
+
+            if ($UseNetworkWatcher) {
+                $NetworkObjects = ConvertFrom-Network -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
+                $GraphObjects += $NetworkObjects
+            }
 
             # Both ConvertFrom-ARM and ConvertFrom-Network are called when usng Azure Resource Group name
             $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
@@ -57,7 +62,30 @@ function ConvertTo-DOTLanguage {
             Write-CustomHost "Plotting sub-graph for $($Target.Type): `"$($Target.Name)`"" -Indentation 1 -color Green -AddTime
 
             if ($TargetType -eq 'Azure Resource Group') {
-                $VNets = Get-AzVirtualNetwork -ResourceGroupName $Target.Name -Verbose:$false
+                
+                $VNets = @()
+                
+                # Get VNets in the resource group
+                $tempVNet = Get-AzVirtualNetwork -ResourceGroupName $Target.Name -Verbose:$false                
+                if ($tempVNet) {
+                    $VNets += $tempVNet
+                }
+                
+                # Get NICs in the resource group
+                $NICs = Get-AzNetworkInterface -ResourceGroupName $Target.Name -Verbose:$false
+                
+                # Get associated VNets for the NICs
+                foreach($NIC in $NICs) {
+                    $subnet = $NIC.IpConfigurations[0].Subnet
+                    if($subnet) {
+                        $vnetName = $subnet.Id.Split('/')[-3]
+                        $nicAssociatedVnet = Get-AzVirtualNetwork -Name $vnetName -Verbose:$false
+                        if($VNets.Name -notcontains $nicAssociatedVnet.Name) {
+                            $VNets += $nicAssociatedVnet
+                        }
+                    }
+                }
+                
                 $NetworkLayout = @()
                 if ($VNets) {
                     
@@ -106,28 +134,31 @@ function ConvertTo-DOTLanguage {
                                     color    = $SubnetGraphColor
                                     bgcolor  = $SubnetGraphBGColor; 
                                 }
-        
-                                # generating dot language for subnets inside virtual networks    
-                                SubGraph -Name $SubnetSubGraphName -Attributes $SubnetSubGraphAttributes -ScriptBlock {    
-                                    $resources_in_subnet = foreach ($item in $VMs_and_NICs) {
-                                        switch ($item.Type) {
-                                            'Microsoft.Compute/virtualMachines' {
-                                                $networkInterface = $NICs.Where( { $_.name -eq ($item.NetworkProfile.NetworkInterfaces[0].Id.Split('/')[-1]) })
-                                                $subnetName = $networkInterface.IpConfigurations[0].Subnet.Id.split('/')[-1] 
-                                            }
-                                            'Microsoft.Network/networkInterfaces' {
-                                                $subnetName = $item.IpConfigurations[0].Subnet.Id.split('/')[-1] 
-                                            }
+
+                                $resources_in_subnet = foreach ($item in $VMs_and_NICs) {
+                                    switch ($item.Type) {
+                                        'Microsoft.Compute/virtualMachines' {
+                                            $networkInterface = $NICs.Where( { $_.name -eq ($item.NetworkProfile.NetworkInterfaces[0].Id.Split('/')[-1]) })
+                                            $subnetName = $networkInterface.IpConfigurations[0].Subnet.Id.split('/')[-1] 
                                         }
-            
-                                        if ($subnetName -eq $subnet.Name) {
-                                            $item | Select-Object Name, Type
+                                        'Microsoft.Network/networkInterfaces' {
+                                            $subnetName = $item.IpConfigurations[0].Subnet.Id.split('/')[-1] 
                                         }
                                     }
-            
-                                    $resources_in_subnet |
-                                    ForEach-Object {
-                                        Get-ImageNode -Name "$($_.Type)/$($_.Name)".tolower() -Rows $_.Name -Type $_.Type
+        
+                                    if ($subnetName -eq $subnet.Name) {
+                                        $item | Select-Object Name, Type
+                                    }
+                                }
+
+                                if ($null -ne $resources_in_subnet) {
+                                    # generating dot language for subnets inside virtual networks    
+                                    SubGraph -Name $SubnetSubGraphName -Attributes $SubnetSubGraphAttributes -ScriptBlock {    
+                
+                                        $resources_in_subnet |
+                                        ForEach-Object {
+                                            Get-ImageNode -Name "$($_.Type)/$($_.Name)".tolower() -Rows $_.Name -Type $_.Type
+                                        }
                                     }
                                 }
                             }
@@ -244,7 +275,7 @@ function ConvertTo-DOTLanguage {
                 if ($TargetType -eq 'Azure Resource Group') {
                     $ResourceGroupLocation = (Get-AzResourceGroup -Name $Target.Name -Verbose:$false).Location
                     $ResourceGroupSubGraphName = [string]::Concat($(Remove-SpecialChars -String $Target.Name -SpecialChars $SpecialChars), $Counter)
-                    $ResourceGroupSubGraphNameLabel = Get-ImageLabel -Type "ResourceGroups" -Row1 "ResourceGroup: $(Remove-SpecialChars -String $Target.name -SpecialChars $SpecialChars)" -Row2 "Location: $($ResourceGroupLocation)"
+                    $ResourceGroupSubGraphNameLabel = Get-ImageLabel -Type "ResourceGroups" -Row1 "ResourceGroup: $($Target.name)" -Row2 "Location: $($ResourceGroupLocation)"
                     $ResourceGroupSubGraphAttributes = @{
                         label    = $ResourceGroupSubGraphNameLabel;
                         labelloc = 't';
@@ -367,7 +398,10 @@ function ConvertTo-DOTLanguage {
                 Write-Error "'GraphViz' is not installed on this system and is a prerequisites for this module to work. Please download and install from here: https://graphviz.org/download/ and re-run this command." -ErrorAction Stop
             }
             else {
-                $dot_file = (Join-Path ([System.IO.Path]::GetTempPath()) "temp.dot")
+                $DestinationPath = $DestinationPath -replace '\.svg$|\.png$', ''
+                $dot_file = $DestinationPath + '.dot'
+                # $dot_file = (Join-Path ($DestinationPath) "temp.dot")
+                
                 $graph | Out-String | Out-File $dot_file -Verbose:$false -Encoding ascii
                 if (Test-Path $dot_file) {
                     if ($IsLinux) {
@@ -377,7 +411,7 @@ function ConvertTo-DOTLanguage {
                         & $GraphViz.FullName $dot_file
                     }
 
-                    Remove-Item $dot_file -Force
+                    # Remove-Item $dot_file -Force
                 }
                 else {
                     $graph | Out-String 

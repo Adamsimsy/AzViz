@@ -52,8 +52,25 @@ function ConvertFrom-ARM {
             #region obtaining-arm-template
             switch ($TargetType) {
                 'Azure Resource Group' { 
+
+                    # Get all resources in the target resource group
+                    $resources = Get-AzResource -ResourceGroupName $Target
+                    Write-CustomHost "Found $($resources.Count) resources in resource group $Target" -Indentation 2 -color Green
+
+                    # Filter out excluded resource types
+                    if ($ExcludeTypes) {
+                        $resources = $resources | Where-Object {
+                            $resource = $_
+                            -not ($ExcludeTypes | Where-Object { $resource.ResourceType -like $_ })
+                        }
+                        Write-CustomHost "After filtering excluded types, found $($resources.Count) resources" -Indentation 2 -color Green
+                    }
+
+                    # Get resource IDs for the filtered resources
+                    $filteredResourceIds = $resources | Select-Object -ExpandProperty ResourceId
+
                     Write-CustomHost "Exporting ARM template of Azure resource group: `'$Target`'" -Indentation 1 -color Green
-                    $template = (Export-AzResourceGroup -ResourceGroupName $Target -SkipAllParameterization -Force -Path $temp_armtemplate -WarningAction SilentlyContinue -Verbose:$false).Path
+                    $template = (Export-AzResourceGroup -ResourceGroupName $Target -Resource $filteredResourceIds -SkipAllParameterization -Force -Path $temp_armtemplate -WarningAction SilentlyContinue -Verbose:$false).Path
                 }
                 'File' { 
                     Write-CustomHost "Accessing ARM template from local file: `'$Target`'" -Indentation 2 -color Green
